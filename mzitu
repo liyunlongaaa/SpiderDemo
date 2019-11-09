@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+
+'''
+@Time    : 2019/11/9 12:23
+@Author  : yoos
+@FileName: 19.mzitu(2).py
+@Software: PyCharm
+ 
+'''
+import os
+from multiprocessing.pool import Pool
+
+import requests
+from bs4 import BeautifulSoup
+from pyquery import PyQuery as pq
+import logging
+import re
+
+headers = {
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
+    'Referer': 'http://www.mzitu.com'
+}
+
+
+# 此请求头Referer破解盗图链接
+Picreferer = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
+    'Referer': 'http://i.meizitu.net'
+}
+
+
+def get_page_urls(url):
+    errorlist = []
+    urls = []
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, 'lxml')
+
+    #首页可跳转页码
+    total = soup.find(class_='nav-links').find_all('a')[-2].string
+    print(total)
+    for i in range(1,int(total)+ 1):
+        print('第{}页'.format(i))
+        baseurl = 'https://www.mzitu.com/page/{}'.format(i)
+        r = requests.get(baseurl,headers = headers)
+        html = r.text
+        try:
+            soup = BeautifulSoup(html,"lxml")
+            lists = soup.find(class_ = 'postlist').find_all('li')
+            for item in lists:
+                url = item.find('span').find('a').get('href')
+                #print(url)
+                urls.append(url)
+        except Exception as e:
+            logging.exception(e)
+            print('第{}页出错'.format(i))
+            errorlist.append('第{}页'.format(i))
+    print('Error = ',errorlist)
+    print(len(errorlist))
+    return urls
+
+
+def download_imgs(URL):
+    html = requests.get(URL,headers = headers).text
+    soup = BeautifulSoup(html,'lxml')
+    '''
+    这一组图片的个数
+    '''
+    total =  soup.find(class_ = 'pagenavi').find_all('a')[-2].string
+    print(total)
+    title = soup.find('h2').string
+    title = re.sub('[/\|*?:"<>]', '', title)  # 去掉标题中的某些字符，不然创建文件夹可能失败
+    print(title)
+    for i in range(1,int(total)+1):
+        url = URL + '/' + str(i)
+        print(i)
+        try:
+            r = requests.get(url,headers = headers)
+            #print(r.text)
+            soup = BeautifulSoup(r.text,'lxml')
+            img_url = soup.find('img')['src']         #这个建议再重新看一下，他不属于 class="main-image"包含的结点。。太阴了
+            print(img_url)
+            r = requests.get(img_url, headers = Picreferer)
+            if not os.path.exists('mzi'+'/' + title):
+                os.mkdir('mzi'+'/'+title)
+            file_path ='mzi'+'/'+ title + '/' + 'img_' + str(i) + '.jpg'
+            if not os.path.exists(file_path):
+                with open(file_path,'wb') as f:
+                    print('正在下载...')
+                    f.write(r.content)
+                    print('下载成功...')
+        except Exception as e:
+            logging.exception(e)
+            print('下载失败...',url)
+
+
+def main(url):
+        download_imgs(url)
+
+if __name__ == '__main__':
+    url = 'https://www.mzitu.com/'    #可以换
+    urls = get_page_urls(url)
+    os.mkdir('mzi')
+    pool = Pool()
+    pool.map(main,urls)
+    pool.close()         #让进程池不再创建进程
+    pool.join()          #让进程池的进程执行完毕后关闭
